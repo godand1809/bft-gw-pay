@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<!--
+  app/static/receipt.html -- Printable proof of purchase (VERSION 1.0.0)
+  Opened from the rider app as /static/receipt.html?id=BFT-YYYY-NNNNNN.
+  Uses @media print rules from styles.css to hide chrome when printed
+  or saved as PDF.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BFT Receipt</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">BFT</div>
+    <h1>Proof of Purchase</h1>
+    <div class="spacer"></div>
+    <a href="/" class="no-print">Back to app</a>
+  </header>
+
+  <main class="wrap" style="max-width:640px">
+    <div class="card" id="receipt-card">
+      <h2>Ben Franklin Transit — Receipt</h2>
+      <div id="receipt-body" style="color:var(--muted)">Loading receipt…</div>
+    </div>
+    <div class="no-print" style="margin-top:14px">
+      <button onclick="window.print()">Print / Save as PDF</button>
+    </div>
+  </main>
+
+  <script>
+    /* Fetch the receipt by id from the URL query string and render it.
+       Ownership is enforced server-side: the API only returns receipts
+       belonging to the signed-in account's session cookie. */
+    const id = new URLSearchParams(location.search).get("id");
+
+    const money = (c) => "$" + (c / 100).toFixed(2);
+
+    (async function render() {
+      if (!id) {
+        document.getElementById("receipt-body").textContent = "Missing receipt id.";
+        return;
+      }
+      const res = await fetch("/api/receipts/" + encodeURIComponent(id));
+      if (!res.ok) {
+        document.getElementById("receipt-body").textContent =
+          res.status === 401 ? "Sign in first (open the rider app)." : "Receipt not found.";
+        return;
+      }
+      const [{ receipt: r, ticket }, me] = await Promise.all([
+        res.clone().json(),
+        fetch("/api/me").then((m) => m.json()),
+      ]);
+      const rows = [
+        ["Receipt number", r.id],
+        ["Date", new Date(r.created_at).toLocaleString()],
+        ["Customer", me.signed_in ? me.email : "—"],
+        ["Type", `<span class="badge ${r.type}">${r.type}</span>`],
+        ["Description", r.description],
+        ["Payment method", r.method],
+        ["Status", `<span class="badge ${r.status}">${r.status}</span>`],
+        ["Total", `<strong>${money(r.amount_cents)}</strong>`],
+      ];
+      if (ticket) {
+        rows.push(["Ticket", ticket.id]);
+        rows.push(["Fare product", ticket.product_name]);
+        rows.push(["Ticket status", `<span class="badge ${ticket.status}">${ticket.status}</span>`]);
+        rows.push(["Rides remaining", ticket.rides_remaining === null ? "Unlimited" : ticket.rides_remaining]);
+        rows.push(["Valid until", new Date(ticket.expires_at).toLocaleString()]);
+      }
+      document.getElementById("receipt-body").innerHTML = `
+        <table style="margin-top:8px">
+          ${rows.map(([k, v]) => `<tr><td style="color:var(--muted);width:160px">${k}</td><td>${v}</td></tr>`).join("")}
+        </table>
+        <p style="margin-top:16px;font-size:12px">
+          Ben Franklin Transit · 1000 W Columbia Dr, Kennewick, WA 99336 · bft.org<br>
+          Keep this receipt as proof of payment. Fares are non-transferable.
+        </p>`;
+    })();
+  </script>
+</body>
+</html>

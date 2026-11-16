@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<!--
+  app/static/dashboard.html -- Agency analytics dashboard (VERSION 1.0.0)
+  KPIs, revenue trend, boardings by route, product mix, payment mix,
+  recent transactions and validations, CSV export.
+  NOTE (demo): /api/admin/* is open; protect behind staff SSO in production.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BFT Analytics Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <!-- Chart.js for all charts (CDN, no build step) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">BFT</div>
+    <h1>Analytics Dashboard</h1>
+    <div class="spacer"></div>
+    <a href="/">Rider</a>
+    <a href="/static/scanner.html">Scanner</a>
+    <a href="/static/dashboard.html" class="active">Analytics</a>
+  </header>
+
+  <main class="wrap">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+      <label for="range" style="margin:0">Range</label>
+      <select id="range" style="width:auto">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <a class="btn" href="/api/admin/export.csv?days=90">Export CSV</a>
+    </div>
+
+    <!-- KPI tiles -->
+    <div class="grid cols-4" id="kpis"></div>
+
+    <!-- Charts -->
+    <div class="grid cols-2" style="margin-top:16px">
+      <section class="card"><h2>Revenue per day</h2><canvas id="chart-revenue"></canvas></section>
+      <section class="card"><h2>Boardings by route</h2><canvas id="chart-routes"></canvas></section>
+      <section class="card"><h2>Revenue by product</h2><canvas id="chart-products"></canvas></section>
+      <section class="card"><h2>Payment mix</h2><canvas id="chart-methods"></canvas></section>
+    </div>
+
+    <!-- Recent activity tables -->
+    <div class="grid cols-2" style="margin-top:16px">
+      <section class="card">
+        <h2>Recent transactions</h2>
+        <table>
+          <thead><tr><th>Receipt</th><th>Type</th><th>Amount</th><th>Rider</th><th>When</th></tr></thead>
+          <tbody id="tx-rows"></tbody>
+        </table>
+      </section>
+      <section class="card">
+        <h2>Recent validations</h2>
+        <table>
+          <thead><tr><th>When</th><th>Route</th><th>Result</th><th>Reason</th><th>Scanner</th></tr></thead>
+          <tbody id="val-rows"></tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

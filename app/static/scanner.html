@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<!--
+  app/static/scanner.html -- Fare validator surface (VERSION 1.0.0)
+  Used by operators: camera-scans rider QR codes, validates them
+  server-side, and shows accept/reject. Also generates printable
+  stop-poster QR codes (server-rendered PNG, no external service).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BFT Fare Validator</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <!-- html5-qrcode: camera QR decoding (CDN, no build step) -->
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">BFT</div>
+    <h1>Fare Validator</h1>
+    <div class="spacer"></div>
+    <a href="/">Rider</a>
+    <a href="/static/scanner.html" class="active">Scanner</a>
+    <a href="/static/dashboard.html">Analytics</a>
+  </header>
+
+  <main class="wrap">
+    <div class="grid cols-2">
+      <!-- CAMERA SCANNER -->
+      <section class="card">
+        <h2>Scan rider QR</h2>
+        <div id="qr-reader" style="width:100%;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden"></div>
+        <div id="scan-result" class="banner info" style="display:none;margin-top:12px"></div>
+        <div style="margin-top:12px">
+          <button id="btn-start" class="green">Start camera</button>
+          <button id="btn-stop" class="ghost">Stop</button>
+        </div>
+      </section>
+
+      <!-- CONTROLS + MANUAL ENTRY -->
+      <section class="card">
+        <h2>Validator settings</h2>
+        <label for="route">Route</label>
+        <select id="route"></select>
+        <label for="scanner-id">Scanner ID</label>
+        <input id="scanner-id" value="SCN-001">
+        <label for="stop">Stop (optional)</label>
+        <select id="stop"><option value="">—</option></select>
+
+        <h2 style="margin-top:20px">Manual payload entry</h2>
+        <label for="payload">QR payload (BFT1:...)</label>
+        <input id="payload" placeholder="BFT1:tkt_xxxx:abcdef1234567890">
+        <button id="btn-validate" style="margin-top:10px">Validate</button>
+
+        <h2 style="margin-top:20px">Local validation log</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Result</th><th>Reason</th></tr></thead>
+          <tbody id="log-rows"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <!-- STOP POSTER QR GENERATOR -->
+    <section class="card" style="margin-top:16px">
+      <h2>Stop poster QR generator</h2>
+      <p style="color:var(--muted);font-size:13px">
+        Generates a printable QR poster for a stop. Riders scan it to open the
+        rider app pre-loaded with that stop context. QR is rendered server-side.
+      </p>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <select id="poster-stop" style="max-width:280px"></select>
+        <button id="btn-poster" class="yellow">Generate poster QR</button>
+      </div>
+      <div id="poster-out" style="margin-top:12px"></div>
+    </section>
+  </main>
+
+  <script src="/static/scanner.js"></script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+/*
+ * app/static/styles.css -- BFT QR Pay design system
+ * VERSION: 1.0.0
+ *
+ * COLOR SCHEME (single source of truth -- reference these variables
+ * everywhere; do not hard-code hex values in components):
+ *   --blue       #00539b  BFT primary blue (buttons, links, charts)
+ *   --blue-dark  #003a6e  topbar gradient end, headings
+ *   --green      #00843d  success/accepted states, secondary accent
+ *   --yellow     #ffb500  BFT logo square, highlights, day-pass accent
+ *   --bg         #f2f5f8  page background
+ *   --card       #ffffff  card surfaces
+ *   --text       #1c2b36  primary text
+ *   --muted      #64748b  secondary text
+ *   --border     #dde5ec  card/table borders
+ *   --danger     #c0392b  rejected/expired/error states
+ *   --ok         #1e8e3e  accepted/live success banners
+ *   --radius     12px     corner radius for cards/buttons
+ */
+
+:root {
+  --blue: #00539b;
+  --blue-dark: #003a6e;
+  --green: #00843d;
+  --yellow: #ffb500;
+  --bg: #f2f5f8;
+  --card: #ffffff;
+  --text: #1c2b36;
+  --muted: #64748b;
+  --border: #dde5ec;
+  --danger: #c0392b;
+  --ok: #1e8e3e;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+}
+
+/* ---------------- Topbar ---------------- */
+.topbar {
+  background: linear-gradient(90deg, var(--blue-dark), var(--blue));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.logo {
+  background: var(--yellow);
+  color: var(--blue-dark);
+  font-weight: 800;
+  font-size: 20px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  letter-spacing: 1px;
+}
+.topbar h1 { font-size: 18px; margin: 0; font-weight: 600; }
+.topbar .spacer { flex: 1; }
+.topbar a {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.topbar a:hover, .topbar a.active { background: rgba(255, 255, 255, 0.15); }
+.topbar .user { font-size: 13px; opacity: 0.9; }
+
+/* ---------------- Layout ---------------- */
+.wrap { max-width: 1080px; margin: 0 auto; padding: 20px; }
+.grid { display: grid; gap: 16px; }
+.grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--blue-dark);
+  border-bottom: 2px solid var(--yellow);
+  display: inline-block;
+  padding-bottom: 4px;
+}
+
+/* ---------------- KPI tiles (dashboard) ---------------- */
+.kpi {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--blue);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.kpi .value { font-size: 26px; font-weight: 700; color: var(--blue-dark); }
+.kpi.green { border-left-color: var(--green); }
+.kpi.yellow { border-left-color: var(--yellow); }
+.kpi.danger { border-left-color: var(--danger); }
+
+/* ---------------- Forms ---------------- */
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input, select {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+  color: var(--text);
+}
+input:focus, select:focus { outline: 2px solid var(--blue); border-color: var(--blue); }
+
+button, .btn {
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button:hover, .btn:hover { background: var(--blue-dark); }
+button.green { background: var(--green); }
+button.green:hover { background: #00682f; }
+button.yellow { background: var(--yellow); color: var(--blue-dark); }
+button.ghost { background: transparent; color: var(--blue); border: 1px solid var(--border); }
+
+/* ---------------- Tabs (rider app) ---------------- */
+.tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.tabs button { background: #e7edf3; color: var(--text); }
+.tabs button.active { background: var(--blue); color: #fff; }
+
+/* ---------------- Tables ---------------- */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+tr:hover td { background: #f7fafc; }
+
+/* ---------------- Status badges ---------------- */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.badge.active, .badge.accepted, .badge.completed { background: #e3f4e9; color: var(--ok); }
+.badge.used, .badge.expired, .badge.rejected { background: #fbe9e7; color: var(--danger); }
+.badge.topup { background: #e3eefb; color: var(--blue); }
+.badge.purchase { background: #fff3d6; color: #9a6b00; }
+
+/* ---------------- Ticket cards (QR) ---------------- */
+.ticket {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+.ticket img.qr { width: 148px; height: 148px; image-rendering: pixelated; border: 1px solid var(--border); border-radius: 8px; }
+.ticket .info { flex: 1; }
+.ticket .info .name { font-weight: 700; font-size: 16px; color: var(--blue-dark); }
+.ticket .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.ticket .payload { font-family: ui-monospace, Consolas, monospace; font-size: 11px; word-break: break-all; color: var(--muted); }
+
+/* ---------------- Fare product grid ---------------- */
+.products { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.product {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  cursor: pointer;
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.product:hover { border-color: var(--blue); box-shadow: 0 2px 8px rgba(0, 83, 155, 0.15); }
+.product.selected { border: 2px solid var(--blue); }
+.product .p-name { font-weight: 700; color: var(--blue-dark); }
+.product .p-price { font-size: 22px; font-weight: 800; margin: 6px 0; }
+.product .p-desc { font-size: 12px; color: var(--muted); }
+
+/* ---------------- Scan / result banners ---------------- */
+.banner {
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.banner.accept { background: #e3f4e9; color: var(--ok); border: 1px solid var(--ok); }
+.banner.reject { background: #fbe9e7; color: var(--danger); border: 1px solid var(--danger); }
+.banner.info { background: #e3eefb; color: var(--blue); border: 1px solid var(--blue); }
+
+/* ---------------- Sign-in ---------------- */
+.signin { max-width: 420px; margin: 60px auto; }
+
+/* ---------------- Print (proof of purchase) ---------------- */
+@media print {
+  .topbar, .no-print { display: none !important; }
+  body { background: #fff; }
+  .card { border: none; box-shadow: none; }
+}

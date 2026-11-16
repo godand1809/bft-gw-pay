@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<!--
+  app/static/index.html -- Rider app (VERSION 1.0.0)
+  Tabs: Wallet | Buy Fare | My Tickets | Receipts
+  Also serves as the landing page for stop-poster QR deep links
+  (?stop=CODE shows a "buy fare for this stop" banner).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BFT QR Pay</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">BFT</div>
+    <h1>QR Fare Payment</h1>
+    <div class="spacer"></div>
+    <a href="/">Rider</a>
+    <a href="/static/scanner.html">Scanner</a>
+    <a href="/static/dashboard.html">Analytics</a>
+    <span class="user" id="user-email"></span>
+    <button id="btn-logout" class="ghost" style="display:none;color:#fff">Sign out</button>
+  </header>
+
+  <!-- Sign-in card: email-only demo auth (auto-creates account) -->
+  <main class="wrap">
+    <div id="signin" class="card signin">
+      <h2>Sign in to BFT QR Pay</h2>
+      <p style="color:var(--muted);font-size:13px">
+        Demo authentication: enter any email address to create or open an account.
+      </p>
+      <label for="email">Email</label>
+      <input id="email" type="email" placeholder="you@example.com">
+      <button id="btn-signin" style="margin-top:12px;width:100%">Sign in</button>
+    </div>
+
+    <div id="app" style="display:none">
+      <div id="stop-banner" class="banner info" style="display:none"></div>
+
+      <div class="tabs">
+        <button data-tab="wallet" class="active">Wallet</button>
+        <button data-tab="buy">Buy Fare</button>
+        <button data-tab="tickets">My Tickets</button>
+        <button data-tab="receipts">Receipts</button>
+      </div>
+
+      <!-- WALLET: balance + simulated top-up -->
+      <section id="tab-wallet" class="card">
+        <h2>Wallet</h2>
+        <p style="font-size:28px;font-weight:800;color:var(--blue-dark)" id="wallet-balance">$0.00</p>
+        <label for="topup-amount">Add funds (demo payment)</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="ghost amt" data-amt="500">$5</button>
+          <button class="ghost amt" data-amt="1000">$10</button>
+          <button class="ghost amt" data-amt="2000">$20</button>
+          <button class="ghost amt" data-amt="5000">$50</button>
+        </div>
+        <label for="card-last4">Card last 4 digits (demo)</label>
+        <input id="card-last4" maxlength="4" placeholder="4242" style="max-width:140px">
+        <button id="btn-topup" class="green" style="margin-top:12px">Top up</button>
+      </section>
+
+      <!-- BUY FARE: product grid with reduced pricing toggle -->
+      <section id="tab-buy" class="card" style="display:none">
+        <h2>Buy a fare</h2>
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="reduced" style="width:auto"> Reduced fare (Youth / Senior / Disability)
+        </label>
+        <div class="products" id="product-grid"></div>
+        <button id="btn-purchase" class="green" style="margin-top:14px" disabled>Select a fare</button>
+      </section>
+
+      <!-- MY TICKETS: scannable QR codes -->
+      <section id="tab-tickets" class="card" style="display:none">
+        <h2>My tickets</h2>
+        <div id="ticket-list"></div>
+      </section>
+
+      <!-- RECEIPTS: proof of purchase list -->
+      <section id="tab-receipts" class="card" style="display:none">
+        <h2>Receipts</h2>
+        <table>
+          <thead><tr><th>Receipt</th><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody id="receipt-rows"></tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
