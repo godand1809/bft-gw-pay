@@ -2,7 +2,7 @@
 # Install with:  pip install -r requirements.txt
 fastapi>=0.110
 uvicorn>=0.29
-qrcode[pil]>=7.4
+qrcode[pil]>=8.2
 pillow>=10.0
 python-multipart>=0.0.33
 pydantic[email]>=2.6
