@@ -1,6 +1,6 @@
 # BFT QR Pay -- Python dependencies (VERSION 1.0.0)
 # Install with:  pip install -r requirements.txt
-fastapi>=0.110
+fastapi>=0.163.1
 uvicorn>=0.29
 qrcode[pil]>=7.4
 pillow>=10.0
