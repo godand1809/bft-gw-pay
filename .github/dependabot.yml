@@ -1,12 +1,11 @@
-# Dependabot configuration (VERSION 1.0.0)
+# Dependabot configuration (VERSION 1.0.1)
+# VERSION 1.0.1 -- removed the "github-actions" ecosystem entry: this repo has
+#   no GitHub Actions workflows (no /.github/workflows/*.yml or /action.yml),
+#   so Dependabot raised "couldn't find a <anything>.yml". (refs: v1.0.0)
 # Weekly pip dependency updates to keep FastAPI/uvicorn/qrcode current.
 version: 2
 updates:
   - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
