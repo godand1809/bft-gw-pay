@@ -4,5 +4,5 @@ fastapi>=0.110
 uvicorn>=0.29
 qrcode[pil]>=7.4
 pillow>=10.0
-python-multipart>=0.0.33
+python-multipart>=0.0.34
 pydantic[email]>=2.6
