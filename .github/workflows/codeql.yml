@@ -1,0 +1,45 @@
+# CodeQL code scanning -- automated security bug finding (VERSION 1.0.0)
+# Runs GitHub's CodeQL analysis on every push/PR to main plus a weekly
+# scheduled scan. Results appear under Security -> Code scanning alerts,
+# giving automated detection of injection, XSS, and other weakness
+# classes in both the Python backend and the JavaScript frontend.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1" # weekly Monday scan
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # required for workflows in private repos, safe in public repos
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended # stricter query pack than default
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

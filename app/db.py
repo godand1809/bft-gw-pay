@@ -1,7 +1,14 @@
 """
 app/db.py -- Database layer for the BFT QR Fare Payment application.
 
-VERSION: 1.0.0 (initial release)
+VERSION: 1.1.0 (security hardening release)
+
+CHANGELOG
+---------
+1.1.0 (refs: v1.0.0):
+  * data/.secret (HMAC signing secret) is now created 0600 (owner
+    read/write only) and pre-existing ≤0644 files are tightened on
+    startup if the OS permits.
 
 WHAT THIS MODULE DOES
 ---------------------
@@ -98,7 +105,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS boardings (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ticket_id   TEXT REFERENCES tickets(id),   -- NULL for rejected scans
-    route_id    TEXT NOT NULL REFERENCES routes(id),
+    route_id    TEXT REFERENCES routes(id),    -- v1.1.0: NULL = unknown route
+                                           -- reported by the scanner
     stop_id     TEXT REFERENCES stops(code),  -- NULL for rejected scans
     result      TEXT NOT NULL,                 -- accepted | rejected
     reason      TEXT NOT NULL,
@@ -190,10 +198,18 @@ def get_secret() -> bytes:
     expire all outstanding tickets.
     """
     if os.path.exists(SECRET_PATH):
+        # v1.1.0: tighten an over-permissive pre-existing file (no-op
+        # where the OS/user does not allow it).
+        try:
+            os.chmod(SECRET_PATH, 0o600)
+        except OSError:
+            pass
         with open(SECRET_PATH, "r", encoding="utf-8") as f:
             return f.read().strip().encode()
     secret = os.urandom(32).hex().encode()
-    with open(SECRET_PATH, "w", encoding="utf-8") as f:
+    # v1.1.0: create with 0600 -- the secret must never be world-readable.
+    fd = os.open(SECRET_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(secret.decode())
     return secret
 

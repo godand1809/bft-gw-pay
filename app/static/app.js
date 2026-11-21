@@ -1,5 +1,11 @@
 /*
- * app/static/app.js -- Rider app logic (VERSION 1.0.0)
+ * app/static/app.js -- Rider app logic (VERSION 1.1.0)
+ *
+ * v1.1.0 SECURITY (refs: v1.0.0):
+ *   - All dynamic values are HTML-escaped via esc() before being
+ *     inserted with innerHTML (defense-in-depth XSS hardening; the
+ *     backend is parameterized-SQL and catalog data is static, but
+ *     we never trust serialized server data in the DOM anyway).
  *
  * FLOW: sign in -> (optional) top up wallet -> buy fare -> QR ticket
  * appears under "My Tickets" -> show QR to the scanner -> receipt
@@ -10,6 +16,10 @@
  */
 
 const $ = (sel) => document.querySelector(sel);
+
+/** HTML-escape a value for safe interpolation into innerHTML. */
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /** Fetch wrapper: JSON in/out, throws Error(message) on !ok. */
 async function api(path, opts = {}) {
@@ -78,9 +88,9 @@ function renderProducts() {
     div.className = "product" + (selectedProduct === p.code ? " selected" : "");
     const price = reduced ? p.reduced_price_cents : p.price_cents;
     div.innerHTML = `
-      <div class="p-name">${p.name}${p.mobile_only ? " 📱" : ""}</div>
+      <div class="p-name">${esc(p.name)}${p.mobile_only ? " 📱" : ""}</div>
       <div class="p-price">${money(price)}</div>
-      <div class="p-desc">${p.description}</div>`;
+      <div class="p-desc">${esc(p.description)}</div>`;
     div.addEventListener("click", () => {
       selectedProduct = p.code;
       const btn = $("#btn-purchase");
@@ -117,12 +127,12 @@ function renderTickets(tickets) {
     div.className = "ticket";
     const rides = t.rides_remaining === null ? "Unlimited" : `${t.rides_remaining} rides left`;
     div.innerHTML = `
-      <img class="qr" src="${t.qr_png_data_uri}" alt="Ticket QR">
+      <img class="qr" src="${esc(t.qr_png_data_uri)}" alt="Ticket QR">
       <div class="info">
-        <div class="name">${t.product_name}</div>
-        <div class="meta">${rides} · expires ${new Date(t.expires_at).toLocaleString()}</div>
-        <span class="badge ${t.status}">${t.status}</span>
-        <div class="payload">${t.qr_payload}</div>
+        <div class="name">${esc(t.product_name)}</div>
+        <div class="meta">${esc(rides)} · expires ${esc(new Date(t.expires_at).toLocaleString())}</div>
+        <span class="badge ${esc(t.status)}">${esc(t.status)}</span>
+        <div class="payload">${esc(t.qr_payload)}</div>
       </div>`;
     list.appendChild(div);
   });
@@ -135,13 +145,13 @@ function renderReceipts(receipts) {
   receipts.forEach((r) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${r.id}</td>
-      <td>${new Date(r.created_at).toLocaleString()}</td>
-      <td><span class="badge ${r.type}">${r.type}</span></td>
-      <td>${r.description}</td>
+      <td>${esc(r.id)}</td>
+      <td>${esc(new Date(r.created_at).toLocaleString())}</td>
+      <td><span class="badge ${esc(r.type)}">${esc(r.type)}</span></td>
+      <td>${esc(r.description)}</td>
       <td>${money(r.amount_cents)}</td>
-      <td><span class="badge ${r.status}">${r.status}</span></td>
-      <td><a class="btn" style="padding:4px 10px;font-size:12px" href="/static/receipt.html?id=${r.id}">View</a></td>`;
+      <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+      <td><a class="btn" style="padding:4px 10px;font-size:12px" href="/static/receipt.html?id=${encodeURIComponent(r.id)}">View</a></td>`;
     rows.appendChild(tr);
   });
 }

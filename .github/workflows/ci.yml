@@ -1,0 +1,42 @@
+# CI -- automated test gate (VERSION 1.0.0)
+# Installs the app, boots it on a fresh database, and runs the full
+# end-to-end suite (rider flow, HMAC tamper checks, receipts, analytics,
+# plus the security regression checks: admin 401/403 and path traversal).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Boot server and run e2e tests
+        run: |
+          python3 run.py &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/healthz > /dev/null; then break; fi
+            sleep 1
+          done
+          python3 tests/e2e_test.py
+
+      - name: Verify security headers
+        run: |
+          for h in X-Content-Type-Options X-Frame-Options Content-Security-Policy Referrer-Policy; do
+            curl -sI http://127.0.0.1:8000/ | grep -i "^$h:" || { echo "missing header: $h"; exit 1; }
+          done
