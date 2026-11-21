@@ -1,5 +1,9 @@
 /*
- * app/static/scanner.js -- Fare validator logic (VERSION 1.0.0)
+ * app/static/scanner.js -- Fare validator logic (VERSION 1.1.0)
+ *
+ * v1.1.0 SECURITY (refs: v1.0.0):
+ *   - log rows and selects now HTML-escape dynamic values (esc)
+ *    before innerHTML insertion (defense-in-depth XSS hardening).
  *
  * FLOW: camera decodes QR -> payload POSTed to /api/validate along with
  * route + scanner id -> server verifies HMAC signature, checks status,
@@ -10,6 +14,10 @@
 
 const $ = (sel) => document.querySelector(sel);
 let html5Scanner = null;
+
+/** HTML-escape a value for safe interpolation into innerHTML. */
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /** Show an accept/reject/info banner. */
 function showBanner(kind, text) {
@@ -23,9 +31,9 @@ function showBanner(kind, text) {
 function logRow(result, reason) {
   const tr = document.createElement("tr");
   const badge = result === "accepted" ? "accepted" : "rejected";
-  tr.innerHTML = `<td>${new Date().toLocaleTimeString()}</td>
-                  <td><span class="badge ${badge}">${result}</span></td>
-                  <td>${reason}</td>`;
+  tr.innerHTML = `<td>${esc(new Date().toLocaleTimeString())}</td>
+                  <td><span class="badge ${badge}">${esc(result)}</span></td>
+                  <td>${esc(reason)}</td>`;
   $("#log-rows").prepend(tr);
 }
 
@@ -90,11 +98,14 @@ $("#btn-validate").addEventListener("click", () => {
 (async function init() {
   const cat = await fetch("/api/catalog").then((r) => r.json());
   cat.routes.forEach((r) => {
-    $("#route").insertAdjacentHTML("beforeend", `<option value="${r.id}">${r.id} — ${r.name}</option>`);
+    $("#route").insertAdjacentHTML("beforeend",
+      `<option value="${esc(r.id)}">${esc(r.id)} — ${esc(r.name)}</option>`);
   });
   cat.stops.forEach((s) => {
-    $("#stop").insertAdjacentHTML("beforeend", `<option value="${s.code}">${s.code} — ${s.name}</option>`);
-    $("#poster-stop").insertAdjacentHTML("beforeend", `<option value="${s.code}">${s.code} — ${s.name}</option>`);
+    $("#stop").insertAdjacentHTML("beforeend",
+      `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`);
+    $("#poster-stop").insertAdjacentHTML("beforeend",
+      `<option value="${esc(s.code)}">${esc(s.code)} — ${esc(s.name)}</option>`);
   });
 })();
 

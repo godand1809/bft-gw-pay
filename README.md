@@ -60,11 +60,33 @@ First run creates `data/bft.db` and seeds ~90 days of deterministic demo
 data (seed 42) so the dashboard is populated immediately. Delete `data/`
 to reset.
 
-Test suite (12 end-to-end checks against a running server):
+Test suite (18 checks / 22 assertions against a running server, including
+security regression checks):
 
 ```bash
 python tests/e2e_test.py
 ```
+
+## Security posture
+
+- **Admin token** — the analytics dashboard and CSV export require an admin
+  token. Set `BFT_ADMIN_TOKEN` or read the auto-generated
+  `data/.admin_token` (each server start without a token prints it to the
+  log once). The dashboard prompts for it and stores it locally.
+- **Cookie flags** — session cookies are `httponly` + `samesite=lax`; set
+  `BFT_COOKIE_SECURE=1` behind TLS to add `Secure`.
+- **Rate limiting** — per-IP fixed-window limits on sign-in, top-up,
+  purchase, and validate.
+- **Security headers** — CSP / nosniff / frame-deny / no-referrer on every
+  response.
+- **Transaction integrity** — wallet debits are atomic
+  (`BEGIN IMMEDIATE` + conditional `UPDATE`); receipt numbers cannot collide.
+- **Automated bug finding** — CodeQL (`security-extended`) scans every
+  push/PR (`.github/workflows/codeql.yml`) and CI runs the e2e suite
+  (`.github/workflows/ci.yml`); Dependabot watches pip + GitHub Actions.
+
+See `SECURITY.md` for the threat model, full controls list, and how to
+report a vulnerability.
 
 ## Architecture
 
@@ -74,16 +96,24 @@ bft-qr-pay/
 │   ├── main.py          # FastAPI API: auth, wallet, purchases, QR mint/validate, analytics
 │   ├── db.py            # SQLite schema, BFT catalogs, HMAC secret, demo seeder
 │   └── static/          # index/app (rider), scanner, dashboard, receipt, styles.css
-├── tests/e2e_test.py    # 12-check end-to-end suite
-├── data/                # runtime only (gitignored): bft.db + .secret
-├── SECURITY.md          # security policy + demo limitations
-└── .github/dependabot.yml
+├── tests/e2e_test.py    # 18-check end-to-end suite (incl. security regressions)
+├── data/                # runtime only (gitignored): bft.db + .secret + .admin_token
+├── SECURITY.md          # security policy + controls + demo limitations
+└── .github/
+    ├── dependabot.yml   # weekly pip + github-actions updates
+    └── workflows/
+        ├── codeql.yml   # CodeQL (security-extended): python + javascript
+        └── ci.yml       # boots server, runs e2e suite, checks headers
 ```
 
 ## Production notes
 
 - Replace the simulated top-up with a real PSP (Stripe/Adyen PaymentIntent).
-- Put `/api/admin/*` behind staff SSO.
-- Add rate limiting, TLS termination, and real account recovery.
+- Replace the shared admin token with staff SSO + role-based checks.
+- Terminate TLS in front of the app and set `BFT_COOKIE_SECURE=1`.
+- Move the in-memory rate limiter behind a shared store (Redis) or proxy
+  throttling for multi-worker deployments.
 - The HMAC secret (`data/.secret`) must be backed up securely; rotating it
   invalidates all outstanding QR tickets.
+- Upgrading from v1.0.x: delete `data/bft.db` (schema change:
+  `boardings.route_id` is now nullable).

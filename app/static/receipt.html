@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  app/static/receipt.html -- Printable proof of purchase (VERSION 1.0.0)
+  app/static/receipt.html -- Printable proof of purchase (VERSION 1.1.0)
   Opened from the rider app as /static/receipt.html?id=BFT-YYYY-NNNNNN.
   Uses @media print rules from styles.css to hide chrome when printed
   or saved as PDF.
@@ -38,6 +38,11 @@
 
     const money = (c) => "$" + (c / 100).toFixed(2);
 
+    /* v1.1.0 SECURITY: HTML-escape dynamic values before innerHTML
+       insertion (defense-in-depth XSS hardening; refs: v1.0.0). */
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
     (async function render() {
       if (!id) {
         document.getElementById("receipt-body").textContent = "Missing receipt id.";
@@ -54,19 +59,19 @@
         fetch("/api/me").then((m) => m.json()),
       ]);
       const rows = [
-        ["Receipt number", r.id],
-        ["Date", new Date(r.created_at).toLocaleString()],
-        ["Customer", me.signed_in ? me.email : "—"],
-        ["Type", `<span class="badge ${r.type}">${r.type}</span>`],
-        ["Description", r.description],
-        ["Payment method", r.method],
-        ["Status", `<span class="badge ${r.status}">${r.status}</span>`],
+        ["Receipt number", esc(r.id)],
+        ["Date", esc(new Date(r.created_at).toLocaleString())],
+        ["Customer", esc(me.signed_in ? me.email : "—")],
+        ["Type", `<span class="badge ${esc(r.type)}">${esc(r.type)}</span>`],
+        ["Description", esc(r.description)],
+        ["Payment method", esc(r.method)],
+        ["Status", `<span class="badge ${esc(r.status)}">${esc(r.status)}</span>`],
         ["Total", `<strong>${money(r.amount_cents)}</strong>`],
       ];
       if (ticket) {
-        rows.push(["Ticket", ticket.id]);
-        rows.push(["Fare product", ticket.product_name]);
-        rows.push(["Ticket status", `<span class="badge ${ticket.status}">${ticket.status}</span>`]);
+        rows.push(["Ticket", esc(ticket.id)]);
+        rows.push(["Fare product", esc(ticket.product_name)]);
+        rows.push(["Ticket status", `<span class="badge ${esc(ticket.status)}">${esc(ticket.status)}</span>`]);
         rows.push(["Rides remaining", ticket.rides_remaining === null ? "Unlimited" : ticket.rides_remaining]);
         rows.push(["Valid until", new Date(ticket.expires_at).toLocaleString()]);
       }

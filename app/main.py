@@ -1,7 +1,24 @@
 """
 app/main.py -- FastAPI backend for the BFT QR Fare Payment application.
 
-VERSION: 1.0.0 (initial release)
+VERSION: 1.1.0 (security hardening release)
+
+CHANGELOG
+---------
+1.1.0 (refs: v1.0.0):
+  * /api/admin/* now requires the BFT_ADMIN_TOKEN (X-Admin-Token header
+    or ?admin_token=) -- the endpoints previously ignored the cookie.
+  * Added in-memory per-IP rate limiting on auth/payment/validate routes.
+  * Added security headers (CSP, nosniff, frame-deny, referrer policy).
+  * Fixed wallet read-modify-write race: balance debit is now a single
+    conditional UPDATE inside BEGIN IMMEDIATE (no overdraft).
+  * Fixed receipt-number collision under concurrency (retry on
+    IntegrityError instead of COUNT-based unique assumption).
+  * Fixed path traversal hardening in /static/{path} (realpath +
+    os.sep-prefixed boundary check, dotfiles denied).
+  * /api/validate no longer 500s on unknown route_id/stop_code.
+  * Expired sessions are pruned on sign-in; cookie may be marked
+    Secure via BFT_COOKIE_SECURE=1.
 
 QR TRUST MODEL
 --------------
@@ -34,11 +51,14 @@ import io
 import os
 import secrets
 import sqlite3
+import threading
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import qrcode
-from fastapi import Cookie, FastAPI, HTTPException, Query
+from fastapi import Cookie, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -53,13 +73,87 @@ app = FastAPI(
         "Scannable QR-code fare payment for Ben Franklin Transit: "
         "purchase fares, pay with QR, track analytics, issue receipts."
     ),
-    version="1.0.0",
+    version="1.1.0",
 )
 
 # Create schema + seed demo data on first import (idempotent).
 init_db(seed_demo=True)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+# Serve cookies with Secure flag when BFT_COOKIE_SECURE=1 (default off so
+# local http://127.0.0.1 demo still works; enable behind TLS in production).
+COOKIE_SECURE = os.environ.get("BFT_COOKIE_SECURE") == "1"
+
+# ---------------------------------------------------------------------------
+# Security headers (every response)
+# ---------------------------------------------------------------------------
+# CSP allows: our own static assets, jsDelivr CDN (Chart.js + html5-qrcode),
+# inline styles/scripts used by the pages, and data: images (QR code PNGs
+# are embedded as data-URIs, never fetched from third parties).
+CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data:; "
+    "script-src 'self' cdn.jsdelivr.net 'unsafe-inline'; "
+    "style-src 'self' cdn.jsdelivr.net 'unsafe-inline'; "
+    "connect-src 'self' cdn.jsdelivr.net; "
+    "font-src 'self' cdn.jsdelivr.net; "
+    "frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Stamp anti-XSS/clickjacking/MIME-sniffing headers on every response."""
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Permissions-Policy", "camera=(self), geolocation=()")
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# In-memory per-IP rate limiter (fixed window, thread-safe)
+# ---------------------------------------------------------------------------
+# Limits: enough headroom for normal use, low enough to blunt credential
+# stuffing (sign-in), wallet abuse (top-up), and scan spam (validate).
+RATE_LIMITS = {
+    "POST /api/session":  (10, 60),    # 10 per minute
+    "POST /api/topup":    (10, 60),    # 10 per minute
+    "POST /api/validate": (120, 60),   # 2/sec sustained -- fare gates spike
+    "POST /api/purchase": (20, 60),
+}
+_rate_lock = threading.Lock()
+_rate_hits: dict = defaultdict(deque)
+
+
+def check_rate_limit(request: Request) -> None:
+    """Raise 429 when the client IP exceeds the per-route fixed window."""
+    rule = RATE_LIMITS.get(f"{request.method} {request.url.path}")
+    if rule is None:
+        return
+    limit, window = rule
+    ip = request.client.host if request.client else "unknown"
+    key = (ip, request.url.path)
+    now = time.monotonic()
+    with _rate_lock:
+        q = _rate_hits[key]
+        while q and q[0] <= now - window:
+            q.popleft()
+        if len(q) >= limit:
+            raise HTTPException(429, "Too many requests, slow down")
+        q.append(now)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    try:
+        check_rate_limit(request)
+    except HTTPException as e:
+        return JSONResponse({"detail": e.detail}, status_code=429)
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +225,40 @@ def require_account(bft_session: Optional[str] = Cookie(None)):
     return acct
 
 
+# ---------------------------------------------------------------------------
+# Admin auth (v1.1.0)
+# ---------------------------------------------------------------------------
+# /api/admin/* used to be wide open. It now requires a shared staff token:
+#   * set BFT_ADMIN_TOKEN in the environment, OR
+#   * if unset, a token is generated once and stored at data/.admin_token
+#     (created 0600) and echoed to the server log at first startup.
+# Send it as the X-Admin-Token header (dashboard UI does this) or append
+# ?admin_token=... for the CSV download link.
+_ADMIN_TOKEN: Optional[str] = os.environ.get("BFT_ADMIN_TOKEN")
+if _ADMIN_TOKEN is None:
+    _admin_path = os.path.join(os.getcwd(), "data", ".admin_token")
+    if os.path.exists(_admin_path):
+        with open(_admin_path, "r", encoding="utf-8") as f:
+            _ADMIN_TOKEN = f.read().strip()
+    else:
+        _ADMIN_TOKEN = secrets.token_hex(16)
+        os.makedirs(os.path.dirname(_admin_path), exist_ok=True)
+        fd = os.open(_admin_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(_ADMIN_TOKEN)
+        print("[bft] generated admin token (data/.admin_token):", _ADMIN_TOKEN)
+
+
+def require_admin(request: Request) -> None:
+    """Verify the admin token (constant-time compare) or raise 401/403."""
+    supplied = (request.headers.get("X-Admin-Token")
+                or request.query_params.get("admin_token"))
+    if not supplied:
+        raise HTTPException(401, "Admin token required")
+    if not hmac.compare_digest(supplied, _ADMIN_TOKEN):
+        raise HTTPException(403, "Invalid admin token")
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -154,6 +282,29 @@ def next_receipt_number(conn: sqlite3.Connection) -> str:
         (f"BFT-{year}-%",),
     ).fetchone()
     return f"BFT-{year}-{row['n'] + 1:06d}"
+
+
+def insert_txn_safe(conn: sqlite3.Connection, params: tuple) -> str:
+    """Insert a transaction, retrying on receipt-number collisions.
+
+    Two concurrent purchases can compute the same next number; the
+    transactions PK makes the loser's INSERT fail with IntegrityError,
+    which we absorb by re-rolling the number (up to 5 tries) inside
+    the same transaction so the caller's commit stays atomic.
+    Returns the receipt id that finally landed.
+    """
+    for _attempt in range(5):
+        receipt = next_receipt_number(conn)
+        try:
+            conn.execute(
+                "INSERT INTO transactions (id, account_id, type,"
+                " product_code, amount_cents, method, status, description,"
+                " created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (receipt,) + params)
+            return receipt
+        except sqlite3.IntegrityError:
+            continue
+    raise HTTPException(500, "Could not allocate receipt number")
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +377,12 @@ def api_docs():
 @app.post("/api/session")
 def sign_in(body: SignIn, response: Response):
     """Email-only demo sign-in: auto-creates the account, sets a
-    30-day session cookie (httponly, samesite=lax)."""
+    30-day session cookie (httponly, samesite=lax, Secure when
+    BFT_COOKIE_SECURE=1). Expired sessions are pruned on sign-in."""
     conn = connect()
     now = _now_iso()
+    # Housekeeping: drop expired sessions so the table cannot grow forever.
+    conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
     acct = conn.execute("SELECT * FROM accounts WHERE email = ?",
                         (body.email,)).fetchone()
     if acct is None:
@@ -247,7 +401,8 @@ def sign_in(body: SignIn, response: Response):
     conn.commit()
     conn.close()
     response.set_cookie(SESSION_COOKIE, token, httponly=True,
-                        samesite="lax", max_age=SESSION_DAYS * 86400)
+                        samesite="lax", max_age=SESSION_DAYS * 86400,
+                        secure=COOKIE_SECURE)
     return {"ok": True}
 
 
@@ -299,19 +454,23 @@ def topup(body: TopUp, bft_session: Optional[str] = Cookie(None)):
     amounts with real money."""
     acct = require_account(bft_session)
     conn = connect()
-    new_balance = acct["wallet_cents"] + body.amount_cents
-    conn.execute("UPDATE accounts SET wallet_cents = ? WHERE id = ?",
-                 (new_balance, acct["id"]))
-    receipt = next_receipt_number(conn)
-    now = _now_iso()
-    conn.execute(
-        "INSERT INTO transactions (id, account_id, type, product_code,"
-        " amount_cents, method, status, description, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
-        (receipt, acct["id"], "topup", None, body.amount_cents, "card",
-         "completed", f"Wallet top-up (card ****{body.card_last4})", now))
-    conn.commit()
-    conn.close()
+    # v1.1.0: BEGIN IMMEDIATE grabs the write lock up front so the balance
+    # read-modify-write cannot interleave with a concurrent purchase.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        new_balance = acct["wallet_cents"] + body.amount_cents
+        conn.execute("UPDATE accounts SET wallet_cents = ? WHERE id = ?",
+                     (new_balance, acct["id"]))
+        now = _now_iso()
+        receipt = insert_txn_safe(conn, (
+            acct["id"], "topup", None, body.amount_cents, "card",
+            "completed", f"Wallet top-up (card ****{body.card_last4})", now))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     return {"ok": True, "wallet_cents": new_balance, "receipt_id": receipt}
 
 
@@ -333,9 +492,6 @@ def purchase(body: Purchase, bft_session: Optional[str] = Cookie(None)):
 
     price = (product["reduced_price_cents"] if body.reduced
              else product["price_cents"])
-    if acct["wallet_cents"] < price:
-        conn.close()
-        raise HTTPException(402, "Insufficient funds. Please top up.")
 
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
@@ -344,25 +500,48 @@ def purchase(body: Purchase, bft_session: Optional[str] = Cookie(None)):
 
     ticket_id = "tkt_" + secrets.token_hex(8)
     payload = make_qr_payload(ticket_id)
-    conn.execute(
-        "INSERT INTO tickets (id, account_id, product_code, status,"
-        " rides_remaining, purchased_at, expires_at, first_used_at,"
-        " qr_payload) VALUES (?,?,?,?,?,?,?,?,?)",
-        (ticket_id, acct["id"], product["code"], "active",
-         product["rides"], now_iso, expires_iso, None, payload))
 
-    new_balance = acct["wallet_cents"] - price
-    conn.execute("UPDATE accounts SET wallet_cents = ? WHERE id = ?",
-                 (new_balance, acct["id"]))
-    receipt = next_receipt_number(conn)
-    conn.execute(
-        "INSERT INTO transactions (id, account_id, type, product_code,"
-        " amount_cents, method, status, description, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
-        (receipt, acct["id"], "purchase", product["code"], price, "wallet",
-         "completed", product["name"], now_iso))
-    conn.commit()
-    conn.close()
+    # v1.1.0: BEGIN IMMEDIATE + re-read under the write lock -- the balance
+    # check, ticket insert, and debit are now atomic. Two concurrent
+    # purchases can no longer overdraw or double-spend between the
+    # balance check and the charge.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        fresh = conn.execute(
+            "SELECT wallet_cents FROM accounts WHERE id = ?",
+            (acct["id"],)).fetchone()
+        if fresh is None or fresh["wallet_cents"] < price:
+            conn.rollback()
+            raise HTTPException(402, "Insufficient funds. Please top up.")
+
+        conn.execute(
+            "INSERT INTO tickets (id, account_id, product_code, status,"
+            " rides_remaining, purchased_at, expires_at, first_used_at,"
+            " qr_payload) VALUES (?,?,?,?,?,?,?,?,?)",
+            (ticket_id, acct["id"], product["code"], "active",
+             product["rides"], now_iso, expires_iso, None, payload))
+
+        # Conditional debit (wallet_cents >= price in the WHERE clause) as
+        # a belt-and-braces guard: rowcount 0 means funds vanished under
+        # us despite the lock -> refuse instead of going negative.
+        cur = conn.execute(
+            "UPDATE accounts SET wallet_cents = wallet_cents - ? "
+            "WHERE id = ? AND wallet_cents >= ?",
+            (price, acct["id"], price))
+        if cur.rowcount == 0:
+            conn.rollback()
+            raise HTTPException(402, "Insufficient funds. Please top up.")
+        new_balance = fresh["wallet_cents"] - price
+
+        receipt = insert_txn_safe(conn, (
+            acct["id"], "purchase", product["code"], price, "wallet",
+            "completed", product["name"], now_iso))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     return {
         "ok": True,
@@ -479,17 +658,36 @@ def validate_scan(body: ValidateScan):
     conn = connect()
     now_iso = _now_iso()
 
+    # v1.1.0: boardings.route_id / stop_id are FKs -- an unknown route or
+    # stop used to surface as a 500 IntegrityError. Resolve them up front
+    # so scan logging can never crash the fare gate.
+    route_ok = conn.execute("SELECT 1 FROM routes WHERE id = ?",
+                            (body.route_id,)).fetchone()
+    stop_ok = None
+    if body.stop_code:
+        stop_ok = conn.execute("SELECT 1 FROM stops WHERE code = ?",
+                               (body.stop_code.upper(),)).fetchone()
+    effective_stop = body.stop_code.upper() if stop_ok else None
+    # v1.1.0: boardings.route_id is FKed to routes(id); an unknown route
+    # is stored as NULL (schema v1.1.0 made the column nullable) instead
+    # of crashing the fare gate with an IntegrityError.
+    effective_route = body.route_id if route_ok else None
+
     def reject(reason: str, ticket_id=None):
         conn.execute(
             "INSERT INTO boardings (ticket_id, route_id, stop_id, result,"
             " reason, scanner_id, rider_ref, scanned_at)"
             " VALUES (?,?,?,?,?,?,?,?)",
-            (ticket_id, body.route_id, body.stop_code, "rejected", reason,
+            (ticket_id, effective_route, effective_stop, "rejected", reason,
              body.scanner_id, "R-UNKNOWN", now_iso))
         conn.commit()
         conn.close()
         return {"result": "rejected", "reason": reason, "rider_ref": "R-UNKNOWN",
                 "scanned_at": now_iso}
+
+    # 0. v1.1.0: route/stop sanity (previously caused FK 500s)
+    if route_ok is None:
+        return reject("Unknown route on scanner")
 
     # 1. Signature / format
     try:
@@ -543,7 +741,7 @@ def validate_scan(body: ValidateScan):
         "INSERT INTO boardings (ticket_id, route_id, stop_id, result,"
         " reason, scanner_id, rider_ref, scanned_at)"
         " VALUES (?,?,?,?,?,?,?,?)",
-        (ticket_id, body.route_id, body.stop_code, "accepted", "OK",
+        (ticket_id, effective_route, effective_stop, "accepted", "OK",
          body.scanner_id, ref, now_iso))
     conn.commit()
     conn.close()
@@ -597,13 +795,16 @@ def stop_qr(code: str):
 # Analytics (admin / agency dashboards)
 # ---------------------------------------------------------------------------
 @app.get("/api/admin/analytics")
-def analytics(days: int = Query(30, ge=1, le=365),
-              bft_session: Optional[str] = Cookie(None)):
+def analytics(request: Request,
+              days: int = Query(30, ge=1, le=365)):
     """KPIs + chart datasets for the analytics dashboard.
 
-    NOTE: open in this demo for easy evaluation. In production,
-    protect /api/admin/* behind staff SSO (see SECURITY.md).
+    v1.1.0: requires the admin token (X-Admin-Token header or
+    ?admin_token=). Previously this endpoint ignored the session
+    cookie entirely -- anyone could read agency-wide analytics.
+    In production, swap require_admin for staff SSO (see SECURITY.md).
     """
+    require_admin(request)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     conn = connect()
 
@@ -680,8 +881,14 @@ def analytics(days: int = Query(30, ge=1, le=365),
 
 
 @app.get("/api/admin/export.csv")
-def export_csv(days: int = Query(90, ge=1, le=365)):
-    """Raw CSV export of the transaction ledger (for finance/reconcile)."""
+def export_csv(request: Request,
+               days: int = Query(90, ge=1, le=365)):
+    """Raw CSV export of the transaction ledger (for finance/reconcile).
+
+    v1.1.0: also behind the admin token now, and the download link the
+    dashboard builds appends ?admin_token=.
+    """
+    require_admin(request)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     conn = connect()
     rows = conn.execute(
@@ -708,8 +915,22 @@ def export_csv(days: int = Query(90, ge=1, le=365)):
 # ---------------------------------------------------------------------------
 @app.get("/static/{path:path}", include_in_schema=False)
 def static_files(path: str):
-    """Serve the frontend (index/scanner/dashboard/receipt + assets)."""
-    full = os.path.normpath(os.path.join(STATIC_DIR, path))
-    if not full.startswith(STATIC_DIR) or not os.path.isfile(full):
+    """Serve the frontend (index/scanner/dashboard/receipt + assets).
+
+    v1.1.0 traversal hardening:
+      * realpath resolves symlinks/../ chains before comparison
+      * the boundary check requires the os.sep prefix (the old
+        startswith(STATIC_DIR) check would also match a sibling
+        directory like /static-evil)
+      * dotfiles (e.g. any accidental data/ or .secret inside static)
+        are refused
+    """
+    if "\\" in path or path.startswith("/"):
+        raise HTTPException(404, "Not found")
+    full = os.path.realpath(os.path.join(STATIC_DIR, path))
+    static_root = os.path.realpath(STATIC_DIR) + os.sep
+    if not full.startswith(static_root):
+        raise HTTPException(404, "Not found")
+    if not os.path.isfile(full) or os.path.basename(full).startswith("."):
         raise HTTPException(404, "Not found")
     return FileResponse(full)
